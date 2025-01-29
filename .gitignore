@@ -1,2 +1,5 @@
 /.vscode
 /Makefile
+/main.exe
+/main.o
+/scores.txt
