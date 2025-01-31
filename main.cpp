@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <vector>
 #include <cctype>
 
 #ifdef SFML_SYSTEM_IOS
@@ -28,6 +29,7 @@ const string nombreVentana = "Cat - Pong";
 const string restartText = "\nPresione espacio para continuar\n\nEsc para salir";
 const float anchoVentana = 1280;
 const float altoVentana = 720;
+bool puntuaciones = false;
 
 //funcion de archivos para puntuaciones
 void escribir(const string &playerName){
@@ -38,7 +40,7 @@ void escribir(const string &playerName){
     }
 
     if(scores.is_open()){
-        scores << "Jugador: " << playerName << "n";
+        scores << "\n" << playerName;
         scores.close();
         cout << "Nombre agregado correctamente: " << playerName << endl; 
     }
@@ -46,11 +48,35 @@ void escribir(const string &playerName){
     scores << playerName;
 }
 
+//funcion para leer los nombres de los jugadores
+string leer() {
+    ifstream scores("scores.txt", ios::in);
+
+    if (scores.fail()) {
+        cout << "Error al leer el archivo de puntuacion" << endl;
+        return "";
+    }
+
+    string nombres [6];//se inicia de esta forma porque el archivo empieza con una linea en blanco
+    int counter = 0;
+    string linea;
+    while ((getline(scores, linea)) && counter < 6) {
+        nombres[counter] = linea;// se llena el vector nombres con los nombres de los jugadores
+        counter++;
+    }
+    scores.close();
+
+    // Construir la cadena de los nombres de los cinco mejores jugadores
+    return "1. " + nombres[1] + "\n\n2. " + nombres[2] + "\n\n3. " + nombres[3] + "\n\n4. " + nombres[4] + "\n\n5. " + nombres[5];
+}
+
+//funcion principal
 int main (){
     bool jugando = false;
+    bool perdiste = false;
     bool ingresaNombre = false;
     bool creditos = false;
-    string playerName = " ";
+    String playerName = " "; //String especial de SFML para manejar texto
     Clock reloj;
     random_device rd;
     mt19937 rng(rd());
@@ -61,7 +87,7 @@ int main (){
     ventana.clear();
     
     //declaración de texturas 
-    Texture pelotaT, player1T, player2T;
+    Texture pelotaT, player1T, player2T, mainScreenT, standbyT, playMapT;
     
     if (!pelotaT.loadFromFile("resources/pelota.png")){
         cout << "Error al cargar textura pelota" << endl;
@@ -72,18 +98,37 @@ int main (){
     if (!player2T.loadFromFile("resources/player2.png")){
         cout << "Error al cargar textura jugador 2" << endl;
     }
+    if (!mainScreenT.loadFromFile("resources/mainScreen.png")){
+        cout << "Error al cargar textura de la pantalla principal" << endl;
+    }
+    if (!standbyT.loadFromFile("resources/standby.png")){
+        cout << "Error al cargar textura de la pantalla de espera" << endl;
+    }
+    if (!playMapT.loadFromFile("resources/playMap.png")){
+        cout << "Error al cargar textura del tablero de juego" << endl;
+    }
+
+    //Inicializacion de sonidos
+    const SoundBuffer sonidoPelota("resources/pelota.wav");
+    Sound bounce(sonidoPelota);
+
     //Declaración de fuente
     Font fuente("resources/8bit16.ttf");
     
     //inicialización de mensajes
     Text pauseMessage(fuente);
     pauseMessage.setCharacterSize(32);
-    pauseMessage.setPosition({170.f, 200.f});
+    pauseMessage.setPosition({340.f, 200.f});
     pauseMessage.setFillColor(sf::Color::White);
 
     Text creditsText(fuente);
-    creditsText.setPosition({170.f, 200.f});
+    creditsText.setPosition({340.f, 200.f});
     creditsText.setFillColor(sf::Color::White);
+
+    Text winnerName(fuente);
+    winnerName.setCharacterSize(32);
+    winnerName.setPosition({static_cast<float>(anchoVentana) / 2, static_cast<float>(altoVentana) / 2});
+    winnerName.setFillColor(sf::Color::White);
     
     //mensajes
     pauseMessage.setString("Bienvenido\n\nPresione:\n\n Espacio para continuar\n\n Esc para salir\n\n Tab para ver puntuaciones \n\n Enter para creditos");
@@ -103,12 +148,24 @@ int main (){
     player2S.setOrigin({static_cast<float>(player2T.getSize() .x) /2, static_cast<float>(player2T.getSize() .y) /2});
     player2S.setScale({static_cast<float>(0.25), static_cast<float>(0.25)});
     const float player2Radio = ((player2T.getSize().y) * (player2S.getScale().y)) / 2;
+
+    Sprite mainScreenS(mainScreenT);
+    mainScreenS.setOrigin({static_cast<float>(mainScreenT.getSize() .x) /2, static_cast<float>(mainScreenT.getSize() .y) /2});
+    mainScreenS.setPosition({static_cast<float>(anchoVentana) /2, static_cast<float>(altoVentana) /2});
+
+    Sprite standbyS(standbyT);
+    standbyS.setOrigin({static_cast<float>(standbyT.getSize() .x) /2, static_cast<float>(standbyT.getSize() .y) /2});
+    standbyS.setPosition({static_cast<float>(anchoVentana) /2, static_cast<float>(altoVentana) /2});
+
+    Sprite playMapS(playMapT);
+    playMapS.setOrigin({static_cast<float>(playMapT.getSize() .x) /2, static_cast<float>(playMapT.getSize() .y) /2});
+    playMapS.setPosition({static_cast<float>(anchoVentana) /2, static_cast<float>(altoVentana) /2});
         
     //Se definen las propiedades de los jugadores
     Clock      aiTimer;
     const Time aiTime = seconds(0.1f);
     const float velJugador = 400.f;
-    float velAi = 0.f;
+    float velAi = 300.f;
     const float velPelota = 400.f;
     Angle anguloPelota = degrees(0); // cambia durante la ejecucion
 
@@ -124,36 +181,35 @@ int main (){
             }
 
             //vista para mostar puntuaciones
-            if(evento->is<Event::KeyPressed>() || (evento->is<Event::KeyPressed>() &&
+            if((evento->is<Event::KeyPressed>() &&
                  evento->getIf<Event::KeyPressed>()->code == Keyboard::Key::Tab)){
                 ventana.clear();
-                //ventana.draw();
-                pauseMessage.setString(restartText);
-                ventana.draw(pauseMessage);
+                puntuaciones = true;
             }
 
             //vista para mostar creditos
-            if(evento->is<Event::KeyPressed>() || (evento->is<Event::KeyPressed>() &&
+            if((evento->is<Event::KeyPressed>() &&
                  evento->getIf<Event::KeyPressed>()->code == Keyboard::Key::Enter)){
-                ventana.clear();
-                creditsText.setCharacterSize(28);
-                creditsText.setString("Proyecto para la asignatura de programacion\n\nIntegrantes\n\n\tJhosua Saa\n\n\tErick Calapi\n\n" + restartText);
-                ventana.draw(creditsText);
+                creditos = true;
             }
 
             //ingresar nombre ganadores
             if(ingresaNombre && evento ->is<Event::TextEntered>()){
                     char tecla = evento ->getIf<Event::TextEntered>()->unicode;
-                    if (tecla == '\b' && !playerName.empty()) { // Manejo de backspace
-                        playerName.pop_back();
-                    } else if (tecla == '\r') { // Al presionar Enter, se guarda el nombre
-                        escribir(playerName);
+                    if (tecla == '\b' && playerName.getSize() > 0) { // Manejo de backspace
+                        playerName.erase(playerName.getSize() - 1, 1);
+                    } else if (tecla == '\r' || tecla == ' ') { // Al presionar Enter o espacio, se guarda el nombre
+                        escribir(playerName.toAnsiString());
                         ingresaNombre = false; // Salir del modo de ingreso
-                    } else if (tecla >= 32 && tecla <= 126) { // Rango de caracteres imprimibles en ASCII
+                    } else if (tecla < 128) { // Rango de caracteres imprimibles en ASCII
                         playerName += static_cast<char>(tecla);
                     }
+                    float writingX = winnerName.getPosition().x + winnerName.getCharacterSize();
+                    winnerName.setFillColor(Color::Black);
+                    winnerName.setString(playerName);
                 }
             
+            //inicio del juego
             if(evento->is<Event::KeyPressed>() &&
                  evento->getIf<Event::KeyPressed>()->code == Keyboard::Key::Space){
                     if(!jugando){
@@ -189,8 +245,8 @@ int main (){
             }
             
             // Movimiento del computador
-            /*if (((velAi < 0.f) && (player2S.getPosition().y - player2Radio > 3.f)) ||
-                ((velAi > 0.f) && (player2S.getPosition().y + player2Radio < altoVentana - 3.f)))
+            if (((velAi < 0.f) && (player2S.getPosition().y - player2Radio > 5.f)) ||
+                ((velAi > 0.f) && (player2S.getPosition().y + player2Radio < altoVentana - 5.f)))
             {
                 player2S.move({0.f, velAi * deltaTime});
             }
@@ -200,12 +256,12 @@ int main (){
             {
                 aiTimer.restart();
                 if (pelotaS.getPosition().y + pelotaRadio > player2S.getPosition().y + player2Radio)
-                    velAi = 0.8 * velJugador;
+                    velAi = 0.65 * velJugador;
                 else if (pelotaS.getPosition().y - pelotaRadio < player2S.getPosition().y - player2Radio)
-                    velAi = - 0.8* velJugador;
+                    velAi = - 0.65* velJugador;
                 else
                     velAi = 0.f;
-            }*/
+            }
 
             // Movimiento de la pelota
             pelotaS.move({velPelota * deltaTime, anguloPelota});
@@ -214,11 +270,13 @@ int main (){
             //Colisiones eje y
             if (pelotaS.getPosition().y - pelotaRadio < 0.f)
             {
+                bounce.play();
                 anguloPelota= -anguloPelota;
                 pelotaS.setPosition({pelotaS.getPosition().x, pelotaRadio + 0.1f});
             }
             if (pelotaS.getPosition().y + pelotaRadio > altoVentana)
             {
+                bounce.play();
                 anguloPelota= -anguloPelota;
                 pelotaS.setPosition({pelotaS.getPosition().x, altoVentana - pelotaRadio - 0.1f});
             }
@@ -227,12 +285,11 @@ int main (){
             if (pelotaS.getPosition().x - pelotaRadio < 0.f)
             {
                 jugando = false;
-                pauseMessage.setString("Perdiste!\n\n" + restartText);
+                perdiste = true;
             }
             if (pelotaS.getPosition().x + pelotaRadio > anchoVentana)
             {
                 jugando = false;
-                pauseMessage.setString("Ganaste!\n\nIngresa tu nombre: ");
                 ingresaNombre = true;
             }
 
@@ -250,6 +307,7 @@ int main (){
                 else
                     anguloPelota = degrees(180) - anguloPelota - degrees(dist(rng));
 
+                bounce.play();
                 pelotaS.setPosition({player1S.getPosition().x + pelotaRadio + player1Radio + 0.1f, pelotaS.getPosition().y});
             }
 
@@ -264,24 +322,77 @@ int main (){
                 else
                     anguloPelota = degrees(180) - anguloPelota - degrees(dist(rng));
 
+                bounce.play();
                 pelotaS.setPosition({player2S.getPosition().x - pelotaRadio - player2Radio - 0.1f, pelotaS.getPosition().y});
             }
-            //TODO implementar sistema de archivos
         }
-
+        
+        //se dibuja en pantalla
         //limpia la ventana
         ventana.clear();
 
         if(jugando)
         {
             //mientras se encuentre jugando se dibujan los sprites
+            ventana.draw(playMapS);
             ventana.draw(pelotaS);
             ventana.draw(player1S);
             ventana.draw(player2S);
         }
+        
+        //muestra el nombre del ganador
+        else if (ingresaNombre)
+        {
+            ventana.draw(standbyS);
+            pauseMessage.setString("Ganaste!\n\nIngresa tu nombre\n\nsin espacios: ");
+            pauseMessage.setFillColor(Color::Black);
+            ventana.draw(pauseMessage);
+            ventana.draw(winnerName);
+        }
+
+        //muestra las puntuaciones
+        else if(puntuaciones){
+            ventana.draw(standbyS);
+            pauseMessage.setCharacterSize(26);
+            pauseMessage.setString("Ganadores\n\n" + leer() + "\n\n" + restartText);
+            pauseMessage.setFillColor(Color::Black);
+            ventana.draw(pauseMessage);
+        }
+
+        //muestra los creditos
+        else if(creditos){
+            ventana.draw(standbyS);
+            creditsText.setCharacterSize(28);
+            creditsText.setString("Proyecto para la asignatura de programacion\n\nIntegrantes\n\n\tJhosua Saa\n\n\tErick Calapi\n\n" + restartText);
+            creditsText.setFillColor(Color::Black);
+            ventana.draw(creditsText);
+        }
+
+        //muestra que el jugador perdió y debe reiniciar
+        else if (perdiste)
+        {
+            ventana.draw(standbyS);
+            pauseMessage.setString("Perdiste!\n\n" + restartText);
+            pauseMessage.setFillColor(Color::Black);
+            ventana.draw(pauseMessage);
+        }
+        
+        //muestra el nombre del ganador
+        else if (ingresaNombre)
+        {
+            ventana.draw(standbyS);
+            pauseMessage.setString("Ganaste!\n\nIngresa tu nombre: ");
+            pauseMessage.setFillColor(Color::Black);
+            ventana.draw(pauseMessage);
+            ventana.draw(winnerName);
+        }
+        
         else
         {   
             //mensaje de bienvenida
+            ventana.draw(mainScreenS);
+            pauseMessage.setCharacterSize(28);
+            pauseMessage.setFillColor(Color::Black);
             ventana.draw(pauseMessage);
         }
         
